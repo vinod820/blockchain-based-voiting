@@ -11,6 +11,8 @@ dotenv.config();
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const app = express();
+
+app.set('trust proxy', true);
 app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname, '..', 'public')));
@@ -38,7 +40,12 @@ const wallet = RELAYER_PRIVATE_KEY ? new ethers.Wallet(RELAYER_PRIVATE_KEY, prov
 const contract = wallet ? new ethers.Contract(CONTRACT_ADDRESS, ABI, wallet) : null;
 const contractRead = CONTRACT_ADDRESS ? new ethers.Contract(CONTRACT_ADDRESS, ABI, provider) : null;
 
-const dbPath = path.join(__dirname, 'db.json');
+const dataDir = path.join(__dirname, 'data');
+const dbPath = path.join(dataDir, 'db.json');
+if (!fs.existsSync(dataDir)) {
+  fs.mkdirSync(dataDir, { recursive: true });
+}
+
 const db = fs.existsSync(dbPath)
   ? JSON.parse(fs.readFileSync(dbPath, 'utf-8'))
   : { students: {}, credentials: {} };
@@ -50,6 +57,14 @@ function persist() {
 function createOtp() {
   return Math.floor(100000 + Math.random() * 900000).toString();
 }
+
+app.get('/api/health', (_req, res) => {
+  res.json({ ok: true, service: 'securevote-backend', timestamp: new Date().toISOString() });
+});
+
+app.get('/api/config', (_req, res) => {
+  res.json({ contractAddress: CONTRACT_ADDRESS || null, chainRpcConfigured: Boolean(RPC_URL) });
+});
 
 app.post('/api/register', (req, res) => {
   const { studentId, email, name } = req.body;
@@ -157,6 +172,10 @@ app.get('/api/results', async (_req, res) => {
   }
 });
 
+app.get('*', (_req, res) => {
+  res.sendFile(path.join(__dirname, '..', 'public', 'index.html'));
+});
+
 app.listen(PORT, () => {
-  console.log(`SecureVote backend running on http://localhost:${PORT}`);
+  console.log(`SecureVote backend running on http://0.0.0.0:${PORT}`);
 });

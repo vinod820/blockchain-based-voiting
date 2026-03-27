@@ -47,6 +47,31 @@ npm run deploy:sepolia
 npm start
 ```
 
+## Deploy on Railway
+1. Push this repo to GitHub.
+2. In Railway, create a **New Project** -> **Deploy from GitHub Repo**.
+3. Railway detects Node and uses `npm start` (configured in `railway.json`).
+4. Add these Railway Variables:
+   - `RPC_URL`
+   - `RELAYER_PRIVATE_KEY`
+   - `CONTRACT_ADDRESS`
+   - `OTP_EXPIRY_SECONDS` (optional, default 300)
+5. Redeploy the service.
+6. Verify deployment health at: `https://<your-app>.up.railway.app/api/health`.
+
+### Railway Notes
+- Data is persisted to `backend/data/db.json` inside the container; treat it as demo storage.
+- For production, replace file storage with PostgreSQL/Redis.
+- Keep relayer keys in Railway Variables only (never commit secrets).
+
+## API Endpoints
+- `GET /api/health`
+- `GET /api/config`
+- `POST /api/register`
+- `POST /api/verify-otp`
+- `POST /api/issue-credential`
+- `GET /api/results`
+
 ## Contract Security Guarantees (MVP)
 - Immutable vote ledger (chain data)
 - One nullifier = one vote
@@ -55,4 +80,4 @@ npm start
 
 ## Important Notes
 - This is a production-like college MVP, not national-election-grade.
-- For real deployment: add external audit, stronger credential cryptography (zk proofs), real OTP/SMS provider, and secure key management (HSM/KMS).
+- For real deployment: add external audit, stronger credential cryptography (zk proofs), real OTP/SMS provider, secure key management (HSM/KMS), and persistent managed database.

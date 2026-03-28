@@ -1,83 +1,107 @@
-# College SecureVote (Blockchain + Anonymous Credential MVP)
+# College SecureVote (Face + OTP + Blockchain MVP)
 
-A full functional MVP for college elections with:
-- Student registration + OTP verification (backend)
-- Anonymous vote credential issuance (nullifier hash)
-- One-person-one-vote enforcement on-chain
-- Vote casting through wallet (MetaMask)
-- Public auditable results
+A functional MVP for college elections with:
+- Student registration + OTP verification
+- Face embedding enrollment in browser (face-api)
+- On-chain registration of `keccak256(faceEmbedding)`
+- Nullifier-based one-person-one-vote enforcement
+- MetaMask vote casting and auditable on-chain tally
 
-## Architecture
-1. Student registers and verifies OTP (`/api/register`, `/api/verify-otp`).
-2. Backend issues a random secret and registers its `keccak256(secret)` as eligible on-chain.
-3. Student casts vote with only the nullifier hash (no student ID sent on-chain).
-4. Contract blocks duplicate nullifier usage and tallies votes.
+## Privacy model
+- Raw face image stays in browser webcam flow.
+- Browser sends only 128-D embedding vector to backend.
+- Backend stores embedding (for similarity check) and writes only `faceHash` to chain.
+- Smart contract stores only `bytes32 faceHash` and nullifier eligibility.
 
-## Tech
-- Solidity + Hardhat
-- Node.js + Express backend
-- Ethers.js
-- Static frontend (`public/`)
+## Architecture flow
+1. `POST /api/register` -> OTP generated.
+2. `POST /api/verify-otp` -> student verified.
+3. Browser captures embedding with face-api from webcam.
+4. `POST /api/enroll-face` -> backend hashes embedding, registers face hash and nullifier on-chain.
+5. On vote day, browser captures a fresh embedding.
+6. `POST /api/verify-face` -> backend Euclidean distance match against enrolled embedding.
+7. Frontend calls `castVote(nullifierHash, faceHash, candidateId)` through MetaMask.
+8. `POST /api/mark-voted` marks off-chain state to block re-use in UI/backend.
 
-## Quick Start (Local)
+## New dependency
+```bash
+npm install @vladmandic/face-api
+```
+
+## Face model files
+Download these weights from:
+- https://github.com/vladmandic/face-api/tree/master/model
+
+Place them in:
+- `public/models/`
+
+Required models for this app:
+- SSD MobileNet v1
+- Face Landmark 68
+- Face Recognition Net
+
+## Quick start (local)
 ```bash
 npm install
 npx hardhat node
 ```
 
-In a second terminal:
+In another terminal:
 ```bash
 cp .env.example .env
-# set RPC_URL=http://127.0.0.1:8545 and PRIVATE_KEY from hardhat accounts
+# set RPC_URL=http://127.0.0.1:8545 and PRIVATE_KEY from hardhat account
 npm run deploy:local
 ```
 
-Update `.env` with deployed `CONTRACT_ADDRESS` and `RELAYER_PRIVATE_KEY`, then:
+Update `.env` with `CONTRACT_ADDRESS` and `RELAYER_PRIVATE_KEY`, then:
 ```bash
 npm start
 ```
-Open http://localhost:3000.
 
-## Deploy to Testnet (e.g., Sepolia)
+Open `http://localhost:3000`.
+
+## Deploy to Sepolia
 ```bash
 cp .env.example .env
 # fill RPC_URL, PRIVATE_KEY, RELAYER_PRIVATE_KEY
 npm run deploy:sepolia
-# copy address into CONTRACT_ADDRESS
+# copy deployed address to CONTRACT_ADDRESS
 npm start
 ```
 
 ## Deploy on Railway
 1. Push this repo to GitHub.
-2. In Railway, create a **New Project** -> **Deploy from GitHub Repo**.
-3. Railway detects Node and uses `npm start` (configured in `railway.json`).
-4. Add these Railway Variables:
+2. In Railway: **New Project** -> **Deploy from GitHub Repo**.
+3. Railway uses `railway.json` and starts with `npm start`.
+4. Add Railway Variables:
    - `RPC_URL`
    - `RELAYER_PRIVATE_KEY`
    - `CONTRACT_ADDRESS`
-   - `OTP_EXPIRY_SECONDS` (optional, default 300)
-5. Redeploy the service.
-6. Verify deployment health at: `https://<your-app>.up.railway.app/api/health`.
+   - `FACE_DISTANCE_THRESHOLD` (optional, default `0.6`)
+   - `OTP_EXPIRY_SECONDS` (optional)
+5. Verify deployment at `/api/health`.
 
-### Railway Notes
-- Data is persisted to `backend/data/db.json` inside the container; treat it as demo storage.
-- For production, replace file storage with PostgreSQL/Redis.
-- Keep relayer keys in Railway Variables only (never commit secrets).
+> Note: Runtime storage is file-based in `backend/data/db.json` for MVP/demo. Use managed DB in production.
 
-## API Endpoints
+## API endpoints
 - `GET /api/health`
 - `GET /api/config`
 - `POST /api/register`
 - `POST /api/verify-otp`
-- `POST /api/issue-credential`
+- `POST /api/enroll-face`
+- `POST /api/verify-face`
+- `POST /api/mark-voted`
+- `POST /api/issue-credential` (legacy compatibility)
 - `GET /api/results`
 
-## Contract Security Guarantees (MVP)
-- Immutable vote ledger (chain data)
-- One nullifier = one vote
-- Eligibility list managed by admin/relayer
-- No direct identity stored on-chain
+## Contract security constraints (MVP)
+- `faceHash` must be registered by admin/relayer.
+- `nullifierHash` must be registered by admin/relayer.
+- `nullifierHash` is single-use only.
+- Vote window is bounded by start/end timestamps.
 
-## Important Notes
-- This is a production-like college MVP, not national-election-grade.
-- For real deployment: add external audit, stronger credential cryptography (zk proofs), real OTP/SMS provider, secure key management (HSM/KMS), and persistent managed database.
+## Production cautions
+- Use anti-spoofing/liveness checks for webcam capture.
+- Use secure HSM/KMS for relayer keys.
+- Encrypt biometric templates at rest.
+- Perform smart contract and backend security audits.

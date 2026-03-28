@@ -1,6 +1,55 @@
 const $ = (id) => document.getElementById(id);
 
 let credential = null;
+let faceapiModule = null;
+let modelsLoaded = false;
+
+async function ensureFaceApiLoaded() {
+  if (!faceapiModule) {
+    faceapiModule = await import('https://cdn.jsdelivr.net/npm/@vladmandic/face-api@1.7.14/dist/face-api.esm.js');
+  }
+
+  if (!modelsLoaded) {
+    const faceapi = faceapiModule;
+    await faceapi.nets.ssdMobilenetv1.loadFromUri('/models');
+    await faceapi.nets.faceRecognitionNet.loadFromUri('/models');
+    await faceapi.nets.faceLandmark68Net.loadFromUri('/models');
+    modelsLoaded = true;
+  }
+
+  return faceapiModule;
+}
+
+async function startCamera() {
+  const stream = await navigator.mediaDevices.getUserMedia({
+    video: { width: 640, height: 480, facingMode: 'user' },
+    audio: false
+  });
+  $('video').srcObject = stream;
+}
+
+async function captureEmbedding() {
+  const faceapi = await ensureFaceApiLoaded();
+  const detection = await faceapi
+    .detectSingleFace($('video'))
+    .withFaceLandmarks()
+    .withFaceDescriptor();
+
+  if (!detection) {
+    throw new Error('No face detected. Adjust camera and lighting.');
+  }
+
+  return Array.from(detection.descriptor);
+}
+
+$('startCameraBtn').onclick = async () => {
+  try {
+    await startCamera();
+    $('cameraOut').textContent = 'Camera started.';
+  } catch (error) {
+    $('cameraOut').textContent = `Camera error: ${error.message}`;
+  }
+};
 
 $('registerBtn').onclick = async () => {
   const studentId = $('studentId').value.trim();
@@ -29,23 +78,55 @@ $('verifyBtn').onclick = async () => {
   $('verifyOut').textContent = data.error ? `Error: ${data.error}` : data.message;
 };
 
-$('credentialBtn').onclick = async () => {
-  const studentId = $('studentId').value.trim();
+$('enrollFaceBtn').onclick = async () => {
+  try {
+    const studentId = $('studentId').value.trim();
+    const embedding = await captureEmbedding();
 
-  const res = await fetch('/api/issue-credential', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ studentId })
-  });
-  const data = await res.json();
+    const res = await fetch('/api/enroll-face', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ studentId, embedding })
+    });
+    const data = await res.json();
 
-  if (data.error) {
-    $('nullifier').textContent = `Error: ${data.error}`;
-    return;
+    if (data.error) {
+      $('faceHash').textContent = `Error: ${data.error}`;
+      return;
+    }
+
+    credential = { nullifierHash: data.nullifierHash, faceHash: data.faceHash };
+    $('faceHash').textContent = data.faceHash;
+    $('nullifier').textContent = data.nullifierHash;
+  } catch (error) {
+    $('faceHash').textContent = `Error: ${error.message}`;
   }
+};
 
-  credential = data;
-  $('nullifier').textContent = data.nullifierHash;
+$('verifyFaceBtn').onclick = async () => {
+  try {
+    const studentId = $('studentId').value.trim();
+    const embedding = await captureEmbedding();
+
+    const res = await fetch('/api/verify-face', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ studentId, embedding })
+    });
+    const data = await res.json();
+
+    if (data.error) {
+      $('verifyFaceOut').textContent = `Error: ${data.error}`;
+      return;
+    }
+
+    credential = { nullifierHash: data.nullifierHash, faceHash: data.faceHash };
+    $('verifyFaceOut').textContent = `Face verified (distance: ${Number(data.distance).toFixed(4)})`;
+    $('faceHash').textContent = data.faceHash;
+    $('nullifier').textContent = data.nullifierHash;
+  } catch (error) {
+    $('verifyFaceOut').textContent = `Error: ${error.message}`;
+  }
 };
 
 $('voteBtn').onclick = async () => {
@@ -55,7 +136,7 @@ $('voteBtn').onclick = async () => {
       return;
     }
     if (!credential) {
-      $('voteOut').textContent = 'Issue credential first';
+      $('voteOut').textContent = 'Enroll and verify face first';
       return;
     }
 
@@ -70,11 +151,17 @@ $('voteBtn').onclick = async () => {
     const contractAddress = $('contractAddress').value.trim();
     const candidateId = Number($('candidateId').value);
 
-    const abi = ['function castVote(bytes32 nullifierHash, uint256 candidateId) external'];
+    const abi = ['function castVote(bytes32 nullifierHash, bytes32 faceHash, uint256 candidateId) external'];
     const contract = new Contract(contractAddress, abi, signer);
 
-    const tx = await contract.castVote(credential.nullifierHash, candidateId);
+    const tx = await contract.castVote(credential.nullifierHash, credential.faceHash, candidateId);
     await tx.wait();
+
+    await fetch('/api/mark-voted', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ studentId: $('studentId').value.trim() })
+    });
 
     $('voteOut').textContent = `Vote submitted. Tx: ${tx.hash}`;
   } catch (error) {

@@ -15,9 +15,11 @@ contract SecureVote {
 
     mapping(bytes32 => bool) public eligibleNullifier;
     mapping(bytes32 => bool) public usedNullifier;
+    mapping(bytes32 => bool) public registeredFaceHash;
 
     event EligibleNullifierRegistered(bytes32 indexed nullifierHash);
-    event VoteCast(bytes32 indexed nullifierHash, uint256 indexed candidateId);
+    event FaceHashRegistered(bytes32 indexed faceHash);
+    event VoteCast(bytes32 indexed nullifierHash, bytes32 indexed faceHash, uint256 indexed candidateId);
 
     modifier onlyAdmin() {
         require(msg.sender == admin, "Only admin");
@@ -47,9 +49,16 @@ contract SecureVote {
         emit EligibleNullifierRegistered(nullifierHash);
     }
 
-    function castVote(bytes32 nullifierHash, uint256 candidateId) external {
+    function registerFaceHash(bytes32 faceHash) external onlyAdmin {
+        require(!registeredFaceHash[faceHash], "Already registered");
+        registeredFaceHash[faceHash] = true;
+        emit FaceHashRegistered(faceHash);
+    }
+
+    function castVote(bytes32 nullifierHash, bytes32 faceHash, uint256 candidateId) external {
         require(block.timestamp >= startTime, "Election not started");
         require(block.timestamp <= endTime, "Election closed");
+        require(registeredFaceHash[faceHash], "Face not registered");
         require(eligibleNullifier[nullifierHash], "Not eligible");
         require(!usedNullifier[nullifierHash], "Already voted");
         require(candidateId < candidates.length, "Invalid candidate");
@@ -57,7 +66,7 @@ contract SecureVote {
         usedNullifier[nullifierHash] = true;
         candidates[candidateId].votes += 1;
 
-        emit VoteCast(nullifierHash, candidateId);
+        emit VoteCast(nullifierHash, faceHash, candidateId);
     }
 
     function candidateCount() external view returns (uint256) {
